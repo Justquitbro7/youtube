@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>JAILEX REMOTE | v14.0.0 YOUTUBE</title>
+
+    <script>
+        const CURRENT_VERSION = "14.0.0-YOUTUBE-OAUTH";
+        if (localStorage.getItem('jailex_system_v') !== CURRENT_VERSION) {
+            if ('serviceWorker' in navigator) {
+                navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                    for(let registration of registrations) { registration.unregister(); }
+                });
+            }
+            if ('caches' in window) {
+                caches.keys().then(function(names) {
+                    for (let name of names) caches.delete(name);
+                });
+            }
+            localStorage.setItem('jailex_system_v', CURRENT_VERSION);
+            window.location.replace(window.location.pathname + "?update=" + Date.now());
+        }
+
+        // --- YOUTUBE OAUTH LISTENER ---
+        const params = new URLSearchParams(window.location.search);
+        if (params.has('yt_token')) {
+            localStorage.setItem('jailex_yt_token', params.get('yt_token'));
+            // Clean the URL so the token is hidden
+            window.history.replaceState({}, document.title, window.location.pathname);
+        }
+    </script>
+    
+    <script src="https://js.pusher.com/8.4.0-rc2/pusher.min.js"></script>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Inter:wght@400;600;700&display=swap">
+    
+    <style>
+        :root { 
+            --blue: #00E5FF; --bears: #C83803; --ai-yellow: #FFD600; 
+            --kick: #53FC18; --fb: #1877F2; --youtube: #FF0000; --twitch: #9146FF;
+            --glass-border: rgba(0, 229, 255, 0.15);
+            --bg: #050914;
+            --blue-glow: rgba(0, 229, 255, 0.4);
+        }
+
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+        html, body { 
+            background-color: var(--bg); 
+            color: white; 
+            font-family: 'Inter', sans-serif; 
+            margin: 0; padding: 0; 
+            height: 100vh; width: 100vw;
+            display: flex; flex-direction: column; 
+            overflow: hidden; 
+        }
+
+        /* --- CINEMATIC SPLASH SCREEN --- */
+        #splash-screen {
+            position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+            background-color: #050914; z-index: 9999;
+            display: flex; justify-content: center; align-items: center; flex-direction: column;
+            transition: opacity 0.8s ease-out; cursor: pointer; overflow: hidden;
+        }
+        #splash-video {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            object-fit: cover; z-index: -1; opacity: 0.4; transition: opacity 0.5s;
+        }
+        #splash-content { display: flex; flex-direction: column; align-items: center; z-index: 1; }
+        #splash-logo { width: 50%; max-width: 250px; height: auto; margin-bottom: 30px; filter: drop-shadow(0 0 25px var(--blue-glow)); }
+        #tap-to-start { font-family: 'Orbitron'; font-size: 14px; font-weight: 900; color: var(--blue); letter-spacing: 4px; text-shadow: 0 0 15px var(--blue-glow); animation: flash 1.5s infinite alternate; }
+        @keyframes flash { from { opacity: 0.3; } to { opacity: 1; } }
+        #splash-screen.fade-out { opacity: 0; pointer-events: none; }
+
+        .bg-layer { position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: radial-gradient(circle at 50% -20%, rgba(0, 229, 255, 0.15), transparent 60%); z-index: -1; pointer-events: none; }
+
+        /* --- NAVIGATION --- */
+        .nav-bar-top { display: flex; justify-content: space-around; background: rgba(5, 9, 20, 0.98); border-bottom: 1px solid var(--glass-border); padding: 15px 0 10px 0; z-index: 2000; width: 100%; }
+        .nav-tab { flex: 1; text-align: center; cursor: pointer; transition: 0.3s ease; opacity: 0.4; }
+        .nav-tab i { display: block; font-size: 30px; margin-bottom: 5px; font-style: normal; }
+        .nav-tab span { display: block; font-size: 10px; font-family: 'Orbitron'; font-weight: 900; }
+        
+        .tab-dash.active { opacity: 1; color: white; text-shadow: 0 0 15px var(--blue); }
+        .tab-dash.active i { filter: drop-shadow(0 0 10px var(--blue)); }
+        .tab-ai.active { opacity: 1; color: white; text-shadow: 0 0 15px var(--ai-yellow); }
+        .tab-ai.active i { filter: drop-shadow(0 0 10px var(--ai-yellow)); }
+        .tab-cam.active { opacity: 1; color: white; text-shadow: 0 0 15px var(--kick); }
+        .tab-cam.active i { filter: drop-shadow(0 0 10px var(--kick)); }
+        .tab-sup.active { opacity: 1; color: white; text-shadow: 0 0 15px var(--bears); }
+        .tab-sup.active i { filter: drop-shadow(0 0 10px var(--bears)); }
+
+        /* --- UI COMPONENTS --- */
+        .view-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; position: relative;}
+        .panel { display: none; height: 100%; flex-direction: column; padding: 16px; overflow-y: auto; } 
+        .panel.active { display: flex; animation: fadeIn 0.2s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+        .stat-grid { display: flex; gap: 10px; margin-bottom: 10px; width: 100%; }
+        .stat-box { flex: 1; padding: 15px 5px; border-radius: 14px; text-align: center; background: rgba(255,255,255,0.02); border: 1px solid; }
+        .stat-box label { display: block; font-weight: bold; font-size: 10px; margin-bottom: 6px; letter-spacing: 0.5px;}
+        .stat-box .val { display: block; font-size: 18px; font-weight: bold; }
+
+        .tracker-box { width: 100%; padding: 12px 0; border-radius: 14px; text-align: center; background: rgba(255,255,255,0.02); border: 1px solid rgba(0, 229, 255, 0.3); margin-bottom: 16px; }
+        .tracker-box label { display: block; color: var(--blue); font-weight: bold; font-size: 10px; letter-spacing: 1.2px; margin-bottom: 6px; }
+        .tracker-box .val { display: block; font-size: 26px; font-weight: bold; color: white; text-shadow: 0 0 10px var(--blue); }
+
+        .glass-card { background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); border-radius: 16px; padding: 20px; margin-bottom: 18px; width: 100%; }
+        .card-h { font-size: 14px; color: var(--blue); font-weight: bold; margin-bottom: 16px; }
+
+        input[type="text"], input[type="number"], input[type="password"] { width: 100%; padding: 14px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; color: white; margin-bottom: 14px; font-size: 14px; outline: none; transition: 0.3s; }
+        input:focus { border-color: var(--blue); }
+        select.dropdown { width: 100%; padding: 14px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.2); border-radius: 10px; color: white; margin-bottom: 14px; font-size: 12px; outline: none; -webkit-appearance: none; appearance: none; }
+
+        .btn-action { width: 100%; height: 50px; background: transparent; border-radius: 50px; font-weight: bold; font-size: 12px; cursor: pointer; text-transform: uppercase; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+        .btn-large { height: 65px; font-size: 14px; }
+        .btn-action:active { filter: brightness(1.5); transform: scale(0.98); }
+
+        .hud-feed { flex: 1; background: rgba(0,0,0,0.6); border: 1px solid var(--glass-border); border-radius: 12px; padding: 16px; font-family: monospace; font-size: 12px; color: #53FC18; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; min-height: 150px;}
+        .version-text { position: absolute; bottom: 15px; right: 15px; font-size: 12px; color: rgba(255,255,255,0.3); font-weight: bold; z-index: 10; pointer-events: none;}
+
+        .row-item { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; }
+        .row-item span { font-size: 12px; }
+        .check-btn { width: 40px; height: 20px; -webkit-appearance: none; background: #333; border-radius: 20px; position: relative; outline: none; transition: 0.3s; }
+        .check-btn:checked { background: var(--blue); }
+        .check-btn::before { content: ''; position: absolute; width: 16px; height: 16px; background: white; border-radius: 50%; top: 2px; left: 2px; transition: 0.3s; }
+        .check-btn:checked::before { left: 22px; }
+        .ai-task { background: rgba(0,0,0,0.45); border: 1px solid rgba(200,56,3,0.4); padding: 12px; border-radius: 8px; display: flex; justify-content: space-between; align-items: center; margin-top: 8px; }
+    </style>
+</head>
+<body>
+
+    <div id="splash-screen">
+        <video id="splash-video" autoplay muted playsinline loop>
+            <source src="test.mp4" type="video/mp4">
+        </video>
+        <div id="splash-content">
+            <img id="splash-logo" src="icon.png" alt="JAILEX Logo">
+            <div id="tap-to-start">TAP TO INITIATE ENGINE</div>
+        </div>
+    </div>
+
+    <div class="bg-layer"></div>
+
+    <nav class="nav-bar-top">
+        <div class="nav-tab tab-dash active" onclick="tab('dash', this)"><i>📊</i><span>DASH</span></div>
+        <div class="nav-tab tab-ai" onclick="tab('ai', this)"><i>🤖</i><span>AI BOT</span></div>
+        <div class="nav-tab tab-cam" onclick="tab('cam', this)"><i>📹</i><span>CAM</span></div>
+        <div class="nav-tab tab-sup" onclick="tab('sup', this)"><i>⚙️</i><span>HELP</span></div>
+    </nav>
+    
+    <main class="view-content">
+        <section id="p-dash" class="panel active">
+            <div class="stat-grid">
+                <div class="stat-box" style="border-color: rgba(145,70,255,0.3);"><label style="color:var(--twitch)">TWITCH</label><span id="tw-s" class="val">OFF</span></div>
+                <div class="stat-box" style="border-color: rgba(83,252,24,0.3);"><label style="color:var(--kick)">KICK</label><span id="ki-s" class="val">OFF</span></div>
+            </div>
+            <div class="stat-grid">
+                <div class="stat-box" style="border-color: rgba(24,119,242,0.3);"><label style="color:var(--fb)">FACEBOOK</label><span id="fb-s" class="val">OFF</span></div>
+                <div class="stat-box" style="border-color: rgba(255,0,0,0.3);"><label style="color:var(--youtube)">YOUTUBE</label><span id="yt-s" class="val">OFF</span></div>
+            </div>
+
+            <div class="tracker-box"><label>LIVE TWITCH FOLLOWERS</label><span id="tw-foll" class="val">Loading...</span></div>
+            
+            <div style="flex: 1; overflow-y: auto; padding-bottom: 20px;">
+                <div class="glass-card">
+                    <div class="card-h">1. TWITCH SETUP</div>
+                    <input type="text" id="tw-i" placeholder="CHANNEL NAME">
+                    <button class="btn-action" style="color:var(--twitch); border: 1px solid var(--twitch);" onclick="connectTwitch()">CONNECT TWITCH</button>
+                </div>
+                <div class="glass-card">
+                    <div class="card-h">2. KICK SETUP</div>
+                    <input type="text" id="ki-i" placeholder="CHANNEL NAME">
+                    <button class="btn-action" style="color:var(--kick); border: 1px solid var(--kick);" onclick="connectKick()">CONNECT KICK</button>
+                </div>
+                <div class="glass-card">
+                    <div class="card-h">3. FACEBOOK LIVE SETUP</div>
+                    <input type="text" id="fb-p-id" placeholder="PAGE ID">
+                    <input type="password" id="fb-p-token" placeholder="PAGE ACCESS TOKEN">
+                    <button class="btn-action" style="color:var(--fb); border: 1px solid var(--fb);" onclick="connectFacebook()">CONNECT FACEBOOK</button>
+                </div>
+                <div class="glass-card">
+                    <div class="card-h">4. YOUTUBE SETUP</div>
+                    <button class="btn-action" style="color:var(--youtube); border: 1px solid var(--youtube); height: 65px;" onclick="connectYouTube()">LOGIN WITH YOUTUBE</button>
+                    <p style="font-size: 10px; margin-top: 10px; color: rgba(255,255,255,0.5); text-align: center;">Official Secure Connection</p>
+                </div>
+            </div>
+
+            <div class="hud-feed" id="hud-feed"><span>[SYS] OMNI ENGINE v14.0.0 [YOUTUBE OAUTH READY]</span></div>
+        </section>
+
+        <section id="p-ai" class="panel">
+            <div class="glass-card">
+                <div class="card-h" style="color:white;">🔊 AUDIO CONTROLS</div>
+                <div class="row-item"><span>MASTER AUDIO ENABLE</span><input type="checkbox" id="t-o" class="check-btn" onchange="saveToggles()" checked></div>
+                <div class="row-item"><span>STANDARD CHAT TTS</span><input type="checkbox" id="std-tts" class="check-btn" onchange="saveToggles()"></div>
+                <div class="row-item"><span>READ USERNAMES</span><input type="checkbox" id="r-u" class="check-btn" onchange="saveToggles()" checked></div>
+            </div>
+            
+            <div class="glass-card">
+                <div class="card-h" style="color:white;">📢 SPEAKER BOT (AUTO-BROADCAST)</div>
+                <input type="text" id="ai-m" placeholder="MESSAGE TO BROADCAST">
+                <input type="number" id="ai-t" placeholder="INTERVAL IN MINUTES (e.g., 10)">
+                <button class="btn-action" style="color:var(--bears); border: 1px solid var(--bears);" onclick="addAI()">SCHEDULE BROADCAST</button>
+                <div id="ai-list" style="margin-top: 15px;"></div>
+            </div>
+
+            <div class="glass-card">
+                <div class="card-h" style="color:white;">🎙️ CUSTOM VOICE ENGINE</div>
+                <button class="btn-action" style="color:var(--bears); border: 1px solid var(--bears); margin-bottom: 15px;" onclick="initVoices()">SCAN FOR VOICES</button>
+                <select id="voice-select" class="dropdown" onchange="saveVoiceOnly()">
+                    <option value="">Select a Voice</option>
+                </select>
+            </div>
+
+            <div class="glass-card">
+                <div class="card-h" style="color:white;">🤖 GROQ AI ENGINE</div>
+                <div class="row-item" style="margin-bottom: 10px;">
+                    <span>ENABLE GROQ RESPONSES</span>
+                    <input type="checkbox" id="grok-on" class="check-btn" onchange="saveGroq()">
+                </div>
+                <input type="password" id="grok-key" placeholder="GROQ API KEY (gsk_...)" onchange="saveGroq()">
+                <input type="text" id="grok-prompt" placeholder="AI PERSONALITY" onchange="saveGroq()">
+                <button class="btn-action" style="color:var(--blue); border: 1px solid var(--blue);" onclick="testGroq()">SAVE AI CONFIG</button>
+            </div>
+
+            <div class="glass-card">
+                <div class="card-h" style="color:white;">🔔 STREAM ALERTS</div>
+                <div class="row-item"><span>FOLLOWER AUDIO ALERTS</span><input type="checkbox" id="al-f" class="check-btn" onchange="saveToggles()" checked></div>
+                <div class="row-item"><span>SUBSCRIBER AUDIO ALERTS</span><input type="checkbox" id="al-s" class="check-btn" onchange="saveToggles()" checked></div>
+                
+                <div style="display:flex; gap:10px; margin-top:15px;">
+                    <button class="btn-action" style="color:var(--twitch); border: 1px solid var(--twitch);" onclick="testAlert('Alert! We have a brand new follower!', 'al-f')">TEST FOLLOW</button>
+                    <button class="btn-action" style="color:var(--kick); border: 1px solid var(--kick);" onclick="testAlert('Massive hype! We have a new subscriber!', 'al-s')">TEST SUB</button>
+                </div>
+            </div>
+        </section>
+
+        <section id="p-cam" class="panel">
+            <div class="glass-card"><button class="btn-action btn-large" style="color:var(--kick); border: 1px solid var(--kick); margin-bottom: 20px;" onclick="window.open('https://vdo.ninja')">VDO.NINJA</button><button class="btn-action btn-large" style="color:var(--blue); border: 1px solid var(--blue);" onclick="window.open('https://studio.golightstream.com')">LIGHTSTREAM</button></div>
+        </section>
+
+        <section id="p-sup" class="panel" style="justify-content: center;">
+            <div class="glass-card" style="text-align: center;">
+                <div class="card-h">SYSTEM HELP</div>
+                <button class="btn-action" style="color:var(--blue); border: 1px solid var(--blue); margin-bottom: 15px;" onclick="window.location.href='mailto:jailexstudios@gmail.com'">EMAIL SUPPORT</button>
+                <button class="btn-action" style="color:white; border: 1px solid white;" onclick="location.reload(true)">FORCE REFRESH</button>
+            </div>
+        </section>
+    </main>
+
+    <div class="version-text">v14.0.0 YOUTUBE OAUTH</div>
+
+    <script>
+        // --- VIDEO INTRO FIX ---
+        const splash = document.getElementById('splash-screen');
+        const splashVid = document.getElementById('splash-video');
+        const splashContent = document.getElementById('splash-content');
+        let introStarted = false;
+
+        function killSplash() { 
+            if (splash && !splash.classList.contains('fade-out')) { 
+                splash.classList.add('fade-out'); 
+                setTimeout(() => { if(splash.parentNode) splash.remove(); }, 800); 
+            } 
+        }
+
+        if (splash) { 
+            splash.addEventListener('click', () => { 
+                if (!introStarted) { 
+                    introStarted = true; 
+                    splashContent.style.display = 'none'; 
+                    splashVid.muted = false;
+                    splashVid.loop = false;
+                    splashVid.currentTime = 0;
+                    splashVid.style.opacity = '1'; 
+                    let p = splashVid.play(); 
+                    if(p !== undefined) p.catch(() => killSplash()); 
+                } else { 
+                    killSplash(); 
+                } 
+            }); 
+            if (splashVid) splashVid.onended = killSplash; 
+        }
+
+        function tab(id, el) { document.querySelectorAll('.panel').forEach(p => p.classList.remove('active')); document.querySelectorAll('.nav-tab').forEach(t => t.classList.remove('active')); document.getElementById('p-'+id).classList.add('active'); el.classList.add('active'); }
+        function addFeed(type, msg) { const feed = document.getElementById('hud-feed'); const color = type === 'sys' ? '#00FFCC' : type === 'ai' ? '#FFD600' : 'white'; const span = document.createElement('span'); span.style.color = color; span.innerText = `[${type.toUpperCase()}] ${msg}`; feed.prepend(span); }
+
+        // --- DATA & PREFS ---
+        window.onload = () => {
+            document.getElementById('tw-i').value = localStorage.getItem('jailex_tw') || "";
+            document.getElementById('ki-i').value = localStorage.getItem('jailex_ki') || "";
+            document.getElementById('fb-p-id').value = localStorage.getItem('jailex_fb_id') || "";
+            document.getElementById('fb-p-token').value = localStorage.getItem('jailex_fb_token') || "";
+            document.getElementById('grok-key').value = localStorage.getItem('jailex_grok_key') || "";
+            document.getElementById('grok-prompt').value = localStorage.getItem('jailex_grok_prompt') || "";
+            
+            if(localStorage.getItem('jailex_grok_on') === 'true') document.getElementById('grok-on').checked = true;
+            if(localStorage.getItem('jailex_ru') !== 'false') document.getElementById('r-u').checked = true;
+            if(localStorage.getItem('jailex_to') !== 'false') document.getElementById('t-o').checked = true;
+            if(localStorage.getItem('jailex_std_tts') === 'true') document.getElementById('std-tts').checked = true;
+            if(localStorage.getItem('jailex_alf') !== 'false') document.getElementById('al-f').checked = true;
+            if(localStorage.getItem('jailex_als') !== 'false') document.getElementById('al-s').checked = true;
+
+            loadAITasks(); setTimeout(initVoices, 500); fetchTwitchFollowers();
+            
+            // Auto-connect YouTube if we have the token
+            if(localStorage.getItem('jailex_yt_token')) connectYouTube();
+        };
+
+        function saveToggles() { 
+            localStorage.setItem('jailex_ru', document.getElementById('r-u').checked); 
+            localStorage.setItem('jailex_to', document.getElementById('t-o').checked); 
+            localStorage.setItem('jailex_std_tts', document.getElementById('std-tts').checked); 
+            localStorage.setItem('jailex_alf', document.getElementById('al-f').checked);
+            localStorage.setItem('jailex_als', document.getElementById('al-s').checked);
+        }
+        
+        function saveGroq() { localStorage.setItem('jailex_grok_on', document.getElementById('grok-on').checked); localStorage.setItem('jailex_grok_key', document.getElementById('grok-key').value.trim()); localStorage.setItem('jailex_grok_prompt', document.getElementById('grok-prompt').value.trim()); addFeed('sys', '> AI CONFIG STORED'); }
+
+        // --- AUDIO ENGINE ---
+        function initVoices() { const vSelect = document.getElementById('voice-select'); const voices = window.speechSynthesis.getVoices(); if(voices.length === 0) return; vSelect.innerHTML = '<option value="">Select Voice</option>'; voices.forEach(v => { if(v.lang.startsWith('en')) { const o = document.createElement('option'); o.textContent = v.name; o.value = v.name; vSelect.appendChild(o); } }); const savedV = localStorage.getItem('jailex_v_name'); if(savedV) vSelect.value = savedV; }
+        if (speechSynthesis.onvoiceschanged !== undefined) speechSynthesis.onvoiceschanged = initVoices;
+        function saveVoiceOnly() { localStorage.setItem('jailex_v_name', document.getElementById('voice-select').value); speak("Voice locked."); }
+        function speak(text) { if(!document.getElementById('t-o').checked) return; window.speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); const savedName = localStorage.getItem('jailex_v_name'); const voices = window.speechSynthesis.getVoices(); if(savedName) u.voice = voices.find(v => v.name === savedName); u.rate = 0.9; window.speechSynthesis.speak(u); }
+        function testAlert(msg, toggleId) { if(document.getElementById(toggleId).checked) { speak(msg); addFeed("ai", `[ALERT] TEST FIRED`); } else { addFeed("sys", "> ALERT BLOCKED (TOGGLE OFF)"); } }
+
+        // --- TWITCH ---
+        async function fetchTwitchFollowers() { const tw = document.getElementById('tw-i').value.trim() || 'justquitbro7'; try { const res = await fetch(`https://decapi.me/twitch/followcount/${tw}`); const count = await res.text(); document.getElementById('tw-foll').innerText = count.includes('User') ? "N/A" : count; } catch(e) { document.getElementById('tw-foll').innerText = "ERR"; } }
+        function connectTwitch() { const tw = document.getElementById('tw-i').value.trim(); if(!tw) return; localStorage.setItem('jailex_tw', tw); const tWS = new WebSocket('wss://irc-ws.chat.twitch.tv:443'); tWS.onopen = () => { tWS.send('PASS oauth:read_only'); tWS.send('NICK justinfan' + Math.floor(Math.random() * 9999)); tWS.send('JOIN #' + tw.toLowerCase()); document.getElementById('tw-s').innerText = "LIVE"; addFeed('sys', "> TWITCH CONNECTED"); }; tWS.onmessage = (e) => { if(e.data.includes('PRIVMSG')) { const u = e.data.split('!')[0].substring(1); const m = e.data.split('PRIVMSG')[1].split(':')[1].trim(); handleIncomingChat('tw', u, m); } if(e.data.includes('PING')) tWS.send('PONG :tmi.twitch.tv'); }; }
+
+        // --- KICK (12-BRIDGE CASCADE) ---
+        async function connectKick() {
+            const ki = document.getElementById('ki-i').value.trim(); if(!ki) return; localStorage.setItem('jailex_ki', ki); addFeed("sys", "> KICK: 12-BRIDGE CASCADE START...");
+            const target = `https://kick.com/api/v1/channels/${ki.toLowerCase()}`;
+            
+            const bridges = [
+                `https://cors.eu.org/${target}`, 
+                `https://api.allorigins.win/get?url=${encodeURIComponent(target)}`, 
+                `https://corsproxy.io/?${encodeURIComponent(target)}`, 
+                `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}`,
+                `https://thingproxy.freeboard.io/fetch/${target}`, 
+                `https://api.allorigins.win/raw?url=${encodeURIComponent(target)}`, 
+                `https://cors-proxy.fringe.zone/${target}`,
+                `https://cors-anywhere.herokuapp.com/${target}`, 
+                `https://api.allorigins.win/get?cache=false&url=${encodeURIComponent(target)}`,
+                `https://corsproxy.io/?cache=none&url=${encodeURIComponent(target)}`, 
+                `https://api.allorigins.win/raw?cache=none&url=${encodeURIComponent(target)}`, 
+                `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(target)}&cache=bust`
+            ];
+            let cId;
+            for (let i = 0; i < bridges.length; i++) {
+                addFeed('sys', `> TEST BRIDGE ${i+1}...`);
+                try { const res = await fetch(bridges[i]); const raw = await res.json(); const data = bridges[i].includes('allorigins') ? JSON.parse(raw.contents) : raw; if(data.chatroom) { cId = data.chatroom.id; addFeed('sys', `> KICK SUCCESS!`); break; } } catch(e) {}
+            }
+            if(cId) { const p = new Pusher('32cbd69e4b950bf97679', { cluster: 'us2', forceTLS: true }); p.subscribe(`chatrooms.${cId}.v2`).bind('App\\Events\\ChatMessageEvent', (d) => { const inner = typeof d.data === 'string' ? JSON.parse(d.data) : d; handleIncomingChat('ki', inner.sender.username, inner.content); }); document.getElementById('ki-s').innerText = "LIVE"; }
+        }
+
+        // --- FACEBOOK LIVE ---
+        let fbTimer;
+        async function connectFacebook() {
+            const pageId = document.getElementById('fb-p-id').value.trim();
+            const token = document.getElementById('fb-p-token').value.trim();
+            if(!pageId || !token) { addFeed('sys', '> FB ERROR: MISSING ID OR TOKEN'); return; }
+            localStorage.setItem('jailex_fb_id', pageId); localStorage.setItem('jailex_fb_token', token);
+            addFeed('sys', '> FACEBOOK: POLLING LIVE VIDEO...');
+            try {
+                const res = await fetch(`https://graph.facebook.com/v22.0/${pageId}/live_videos?fields=id,status&access_token=${token}`);
+                const data = await res.json();
+                const liveVideo = data.data.find(v => v.status === 'LIVE');
+                if(!liveVideo) { addFeed('sys', '> FB: NO LIVE VIDEO DETECTED'); return; }
+                const vidId = liveVideo.id;
+                addFeed('sys', `> FB: CONNECTED TO LIVE [${vidId}]`);
+                document.getElementById('fb-s').innerText = "LIVE";
+                clearInterval(fbTimer); let lastSeen = Date.now();
+                fbTimer = setInterval(async () => {
+                    const cRes = await fetch(`https://graph.facebook.com/v22.0/${vidId}/comments?fields=from,message,created_time&order=reverse_chronological&access_token=${token}`);
+                    const cData = await cRes.json();
+                    if(cData.data) {
+                        cData.data.forEach(c => {
+                            if(new Date(c.created_time).getTime() > lastSeen) { handleIncomingChat('fb', c.from.name, c.message); }
+                        });
+                        lastSeen = Date.now();
+                    }
+                }, 5000);
+            } catch(e) { addFeed('sys', '> FB API ERROR'); }
+        }
+
+        // --- YOUTUBE OAUTH 2.0 API ---
+        let ytChatTimer;
+        async function connectYouTube() {
+            const token = localStorage.getItem('jailex_yt_token');
+            
+            // If no token exists, route to the Vercel backend to trigger the Google Pop-up
+            if(!token) { 
+                addFeed("sys", "> YOUTUBE: ROUTING TO OFFICIAL LOGIN...");
+                window.location.href = '/api/yt-login';
+                return; 
+            }
+            
+            addFeed("sys", "> YOUTUBE: LOCATING ACTIVE STREAM...");
+            
+            try {
+                // Step 1: Use the secure token to find the user's active broadcast
+                const bRes = await fetch('https://www.googleapis.com/youtube/v3/liveBroadcasts?part=snippet&broadcastStatus=active&broadcastType=all', {
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                const bData = await bRes.json();
+                
+                if(bData.items && bData.items.length > 0) {
+                    const chatHandle = bData.items[0].snippet.liveChatId;
+                    document.getElementById('yt-s').innerText = "LIVE"; 
+                    addFeed('sys', "> YT CONNECTED TO LIVE CHAT");
+                    
+                    clearInterval(ytChatTimer); let pageToken = null;
+                    
+                    // Step 2: Poll the chat using the token
+                    ytChatTimer = setInterval(async () => {
+                        let url = `https://www.googleapis.com/youtube/v3/liveChat/messages?liveChatId=${chatHandle}&part=snippet,authorDetails`;
+                        if(pageToken) url += `&pageToken=${pageToken}`;
+                        
+                        const cRes = await fetch(url, { headers: { 'Authorization': `Bearer ${token}` } }); 
+                        const cData = await cRes.json();
+                        
+                        // If token expired, clear it and alert user
+                        if(cData.error && cData.error.code === 401) {
+                            addFeed('sys', "> YT TOKEN EXPIRED. PLEASE RELOGIN.");
+                            localStorage.removeItem('jailex_yt_token');
+                            clearInterval(ytChatTimer);
+                            document.getElementById('yt-s').innerText = "OFF";
+                            return;
+                        }
+                        
+                        if(cData.items && pageToken) { 
+                            cData.items.forEach(m => handleIncomingChat('yt', m.authorDetails.displayName, m.snippet.textMessageDetails.messageText)); 
+                        }
+                        if(cData.nextPageToken) pageToken = cData.nextPageToken;
+                    }, 10000);
+                } else {
+                    addFeed('sys', "> YT ERROR: NO ACTIVE STREAM DETECTED ON ACCOUNT.");
+                }
+            } catch(e) { 
+                addFeed('sys', "> YT API ERROR."); 
+            }
+        }
+
+        // --- AI LOGIC ---
+        function handleIncomingChat(p, u, m) { addFeed(p, `${u}: ${m}`); if(document.getElementById('grok-on').checked && document.getElementById('grok-key').value) { queryGroq(u, m); } else if(document.getElementById('std-tts').checked) { speak(document.getElementById('r-u').checked ? `${u} says ${m}` : m); } }
+        async function queryGroq(u, m) { const k = document.getElementById('grok-key').value; const p = document.getElementById('grok-prompt').value || "Bot"; try { const res = await fetch('https://api.groq.com/openai/v1/chat/completions', { method: 'POST', headers: { 'Authorization': `Bearer ${k}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: "llama-3.1-8b-instant", messages: [{role: "system", content: p}, {role: "user", content: `${u}: ${m}`}], max_tokens: 70 }) }); if(res.ok) { const d = await res.json(); let r = d.choices[0].message.content.replace(/[*_~`"\[\]]/g, '').trim(); speak(r); addFeed('ai', r); } } catch(e) {} }
+        async function testGroq() { saveGroq(); queryGroq("System", "Groq Test"); }
+
+        // --- BROADCAST ---
+        let activeAITimers = {};
+        function loadAITasks() { let tasks = JSON.parse(localStorage.getItem('jailex_ai_tasks') || '[]'); tasks.forEach(t => { startAITask(t.id, t.msg, t.time); renderAITask(t.id, t.msg, t.time); }); }
+        function addAI() { const m = document.getElementById('ai-m').value; const t = parseFloat(document.getElementById('ai-t').value); if(!m || !t) return; const id = 'task-' + Date.now(); startAITask(id, m, t); renderAITask(id, m, t); let tasks = JSON.parse(localStorage.getItem('jailex_ai_tasks') || '[]'); tasks.push({id, msg: m, time: t}); localStorage.setItem('jailex_ai_tasks', JSON.stringify(tasks)); }
+        function startAITask(id, msg, time) { activeAITimers[id] = setInterval(() => { speak(msg); addFeed('ai', `[MSG] ${msg}`); }, time * 60000); }
+        function renderAITask(id, msg, time) { document.getElementById('ai-list').insertAdjacentHTML('beforeend', `<div id="${id}" class="ai-task"><span><b>${time}m:</b> ${msg}</span><strong onclick="removeAITask('${id}')" style="color:red; cursor:pointer;">✕</strong></div>`); }
+        function removeAITask(id) { clearInterval(activeAITimers[id]); delete activeAITimers[id]; document.getElementById(id).remove(); let tasks = JSON.parse(localStorage.getItem('jailex_ai_tasks') || '[]'); localStorage.setItem('jailex_ai_tasks', JSON.stringify(tasks.filter(t => t.id !== id))); }
+    </script>
+</body>
+</html>
